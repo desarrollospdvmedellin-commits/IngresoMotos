@@ -1,0 +1,1015 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Entregas · PDV Medellín</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg: #0B0E13;
+    --bg-2: #0F1420;
+    --surface: #151B27;
+    --surface-2: #1B2330;
+    --line: #262F3F;
+    --text: #F2F4F8;
+    --muted: #8A94A8;
+    --muted-2: #5C6779;
+    --accent: #6C7BFF;
+    --accent-dim: #454F8F;
+    --verde: #2ECC71;
+    --amarillo: #FFC93C;
+    --naranja: #FF8C32;
+    --rojo: #FF4545;
+    --verde-bg: rgba(46,204,113,0.14);
+    --amarillo-bg: rgba(255,201,60,0.14);
+    --naranja-bg: rgba(255,140,50,0.16);
+    --rojo-bg: rgba(255,69,69,0.16);
+    --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, 'Roboto Mono', monospace;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 50% -10%, rgba(108,123,255,0.08), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* ---------- HEADER / NAV ---------- */
+  header{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: 14px 24px; gap:16px; flex-wrap:wrap;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, var(--bg-2), var(--bg));
+    position: sticky; top:0; z-index: 50;
+  }
+  .brand{ display:flex; align-items:center; gap:12px; }
+  .brand-mark{
+    width:36px; height:36px; border-radius:9px;
+    background: conic-gradient(from 220deg, var(--verde), var(--amarillo), var(--naranja), var(--rojo), var(--verde));
+    display:flex; align-items:center; justify-content:center;
+    box-shadow: inset 0 0 0 3px var(--bg-2);
+  }
+  .brand-mark::after{ content:''; width:16px; height:16px; border-radius:50%; background:var(--bg-2); }
+  .brand-text .eyebrow{ font-size:11px; letter-spacing:.14em; color:var(--muted); text-transform:uppercase; font-weight:600; }
+  .brand-text .title{ font-size:16px; font-weight:700; letter-spacing:-.01em; }
+
+  nav.tabs{ display:flex; gap:6px; background:var(--surface); padding:4px; border-radius:12px; border:1px solid var(--line); }
+  nav.tabs button{
+    appearance:none; border:none; background:transparent; color:var(--muted);
+    font-family:var(--font-body); font-weight:600; font-size:13px; letter-spacing:.01em;
+    padding:9px 16px; border-radius:9px; cursor:pointer; transition: all .15s ease; white-space:nowrap;
+  }
+  nav.tabs button:hover{ color:var(--text); }
+  nav.tabs button.active{ background:var(--accent); color:#fff; box-shadow:0 4px 14px rgba(108,123,255,.35); }
+
+  .header-actions{ display:flex; align-items:center; gap:10px; }
+  .btn-ghost{
+    appearance:none; border:1px solid var(--line); background:var(--surface); color:var(--muted);
+    font-family:var(--font-body); font-weight:600; font-size:12px; padding:9px 14px; border-radius:9px; cursor:pointer;
+  }
+  .btn-ghost:hover{ color:var(--text); border-color:var(--accent-dim); }
+
+  main{ flex:1; padding: 22px 24px 60px; max-width:1400px; margin:0 auto; width:100%; }
+  .view{ display:none; animation: fadein .25s ease; }
+  .view.active{ display:block; }
+  @keyframes fadein{ from{ opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);} }
+
+  /* ---------- TABLERO ---------- */
+  .board-stats{ display:flex; gap:14px; margin-bottom:22px; flex-wrap:wrap; }
+  .stat-card{
+    flex:1; min-width:150px; background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:16px 18px;
+  }
+  .stat-card .num{ font-family:var(--font-mono); font-size:30px; font-weight:700; line-height:1; }
+  .stat-card .lbl{ font-size:11px; text-transform:uppercase; letter-spacing:.1em; color:var(--muted); margin-top:6px; font-weight:600; }
+  .stat-card.warn .num{ color:var(--rojo); }
+
+  .board-grid{
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap:18px;
+  }
+  .empty-state{
+    text-align:center; padding:80px 20px; color:var(--muted); border:1px dashed var(--line); border-radius:16px;
+  }
+  .empty-state .big{ font-size:40px; margin-bottom:10px; }
+
+  .ticket{
+    position:relative; background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:18px;
+    display:flex; gap:16px; align-items:center;
+    border-left: 5px solid var(--muted-2);
+    transition: border-color .3s ease, background .3s ease;
+    overflow:hidden;
+  }
+  .ticket::before{
+    content:''; position:absolute; left:-9px; top:50%; width:18px; height:18px; border-radius:50%;
+    background:var(--bg); border:1px solid var(--line); transform:translateY(-50%);
+  }
+  .ticket.zone-verde{ border-left-color:var(--verde); background: linear-gradient(90deg, var(--verde-bg), var(--surface) 40%); }
+  .ticket.zone-amarillo{ border-left-color:var(--amarillo); background: linear-gradient(90deg, var(--amarillo-bg), var(--surface) 40%); }
+  .ticket.zone-naranja{ border-left-color:var(--naranja); background: linear-gradient(90deg, var(--naranja-bg), var(--surface) 40%); }
+  .ticket.zone-rojo{ border-left-color:var(--rojo); background: linear-gradient(90deg, var(--rojo-bg), var(--surface) 40%); animation: pulse-rojo 1.6s ease-in-out infinite; }
+  @keyframes pulse-rojo{ 0%,100%{ box-shadow:0 0 0 rgba(255,69,69,0);} 50%{ box-shadow:0 0 24px rgba(255,69,69,.25);} }
+
+  .rank-badge{
+    position:absolute; top:14px; right:14px; font-family:var(--font-mono); font-size:11px; font-weight:700;
+    color:var(--muted); background:var(--bg-2); border:1px solid var(--line); border-radius:20px; padding:3px 9px;
+  }
+
+  .gauge-wrap{ position:relative; width:92px; height:92px; flex-shrink:0; }
+  .gauge-wrap svg{ width:100%; height:100%; transform:rotate(-90deg); }
+  .gauge-track{ fill:none; stroke:var(--line); stroke-width:8; }
+  .gauge-fill{ fill:none; stroke-width:8; stroke-linecap:round; transition: stroke-dashoffset .5s linear, stroke .3s ease; }
+  .gauge-center{
+    position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  }
+  .gauge-time{ font-family:var(--font-mono); font-size:20px; font-weight:700; letter-spacing:-.02em; }
+  .gauge-unit{ font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
+
+  .ticket-info{ flex:1; min-width:0; }
+  .ticket-info .cliente{ font-size:16px; font-weight:700; margin-bottom:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .ticket-info .moto{ font-size:13px; color:var(--muted); margin-bottom:8px; }
+  .ticket-meta{ display:flex; flex-wrap:wrap; gap:6px 14px; font-size:12px; color:var(--muted); }
+  .ticket-meta b{ color:var(--text); font-weight:600; }
+  .chip{
+    display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:700; padding:3px 9px; border-radius:20px;
+    border:1px solid var(--line); background:var(--bg-2); color:var(--muted);
+  }
+  .chip.tipo-A{ color:#FF8C32; border-color:rgba(255,140,50,.4); }
+  .chip.tipo-B{ color:#FFC93C; border-color:rgba(255,201,60,.4); }
+  .chip.tipo-C{ color:#2ECC71; border-color:rgba(46,204,113,.4); }
+
+  .ticket-actions{ display:flex; flex-direction:column; gap:8px; }
+  .btn-entregada{
+    appearance:none; border:none; background:var(--verde); color:#08301A; font-weight:700;
+    font-size:12px; padding:10px 14px; border-radius:10px; cursor:pointer; white-space:nowrap;
+    box-shadow:0 4px 14px rgba(46,204,113,.25);
+  }
+  .btn-entregada:hover{ filter:brightness(1.08); }
+
+  .screen-mode header{ display:none !important; }
+  .screen-mode main{ padding-top:20px; }
+
+  /* ---------- PANELES / FORMULARIOS ---------- */
+  .grid-2{ display:grid; grid-template-columns: 1fr 1fr; gap:20px; }
+  @media (max-width: 880px){ .grid-2{ grid-template-columns: 1fr; } }
+  .panel{ background:var(--surface); border:1px solid var(--line); border-radius:16px; padding:22px; margin-bottom:20px; }
+  .panel h2{ font-size:15px; margin:0 0 4px; }
+  .panel p.hint{ font-size:12.5px; color:var(--muted); margin:0 0 18px; line-height:1.5; }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:12px; font-weight:600; color:var(--muted); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em; }
+  .field input, .field select{
+    width:100%; background:var(--bg-2); border:1px solid var(--line); color:var(--text); font-family:var(--font-body);
+    font-size:15px; padding:12px 14px; border-radius:10px; outline:none;
+  }
+  .field input:focus, .field select:focus{ border-color:var(--accent); }
+  .btn-primary{
+    appearance:none; border:none; background:var(--accent); color:#fff; font-weight:700; font-size:14px;
+    padding:14px 20px; border-radius:11px; cursor:pointer;
+  }
+  .btn-primary:hover{ filter:brightness(1.08); }
+  .btn-primary:disabled{ opacity:.5; cursor:not-allowed; }
+  .btn-primary.full{ width:100%; }
+  .feedback{ margin-top:12px; font-size:13px; padding:10px 12px; border-radius:9px; display:none; }
+  .feedback.ok{ display:block; background:var(--verde-bg); color:var(--verde); }
+  .feedback.err{ display:block; background:var(--rojo-bg); color:var(--rojo); }
+
+  /* ---------- AGENDA DEL DÍA ---------- */
+  .date-switch{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+  .date-switch .seg{ display:flex; background:var(--surface); border:1px solid var(--line); border-radius:11px; padding:4px; }
+  .date-switch .seg button{
+    appearance:none; border:none; background:transparent; color:var(--muted); font-weight:700; font-size:13px;
+    padding:9px 16px; border-radius:8px; cursor:pointer;
+  }
+  .date-switch .seg button.active{ background:var(--accent); color:#fff; }
+  .date-switch input[type=date]{
+    background:var(--surface); border:1px solid var(--line); color:var(--text); padding:9px 12px; border-radius:10px; font-size:13px;
+  }
+  .date-switch .current-label{ color:var(--muted); font-size:13px; margin-left:auto; }
+
+  .quick-form{ display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
+  .quick-form .field{ margin-bottom:0; min-width:170px; flex:1; }
+  .walkin-box{ margin-top:16px; padding-top:16px; border-top:1px solid var(--line); display:flex; gap:12px; align-items:end; flex-wrap:wrap; }
+  .walkin-box .field{ margin-bottom:0; min-width:200px; flex:1; }
+
+  .table-wrap{ overflow:auto; border:1px solid var(--line); border-radius:14px; }
+  table.agenda-table, table.map-table, table.hist-table{ width:100%; border-collapse:collapse; font-size:13px; }
+  table.agenda-table th, table.agenda-table td,
+  table.map-table th, table.map-table td,
+  table.hist-table th, table.hist-table td{
+    padding:11px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle;
+  }
+  table.agenda-table th, table.map-table th, table.hist-table th{
+    color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+    background:var(--surface-2); position:sticky; top:0;
+  }
+  table.map-table select{ background:var(--bg-2); border:1px solid var(--line); color:var(--text); padding:6px 8px; border-radius:7px; font-size:12.5px; }
+
+  .badge{ display:inline-flex; align-items:center; gap:6px; font-size:11px; font-weight:700; padding:4px 10px; border-radius:20px; }
+  .badge-programada{ background:var(--bg-2); color:var(--muted); border:1px solid var(--line); }
+  .badge-entregada{ background:var(--verde-bg); color:var(--verde); }
+  .badge-verde{ background:var(--verde-bg); color:var(--verde); }
+  .badge-amarillo{ background:var(--amarillo-bg); color:var(--amarillo); }
+  .badge-naranja{ background:var(--naranja-bg); color:var(--naranja); }
+  .badge-rojo{ background:var(--rojo-bg); color:var(--rojo); }
+  .row-esperando.z-rojo{ background: var(--rojo-bg); }
+  .row-esperando.z-naranja{ background: var(--naranja-bg); }
+  .row-esperando.z-amarillo{ background: var(--amarillo-bg); }
+  .row-esperando.z-verde{ background: var(--verde-bg); }
+  .row-entregada{ opacity:.55; }
+
+  .btn-mini{
+    appearance:none; border:none; background:var(--accent); color:#fff; font-weight:700; font-size:11.5px;
+    padding:8px 12px; border-radius:8px; cursor:pointer; white-space:nowrap;
+  }
+  .btn-mini.green{ background:var(--verde); color:#08301A; }
+  .cell-elapsed{ font-family:var(--font-mono); font-weight:700; }
+
+  /* ---------- BASE DIARIA ---------- */
+  .dropzone{
+    border:2px dashed var(--line); border-radius:16px; padding:40px 20px; text-align:center; cursor:pointer;
+    transition: border-color .2s ease, background .2s ease;
+  }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--accent); background:rgba(108,123,255,.06); }
+  .dropzone .big{ font-size:34px; margin-bottom:8px; }
+  .dropzone .sub{ font-size:12.5px; color:var(--muted); margin-top:6px; }
+
+  /* ---------- HISTORIAL ---------- */
+  .hist-toolbar{ display:flex; gap:12px; align-items:end; flex-wrap:wrap; margin-bottom:18px; }
+  .hist-toolbar .field{ margin-bottom:0; min-width:160px; }
+  .btn-export{
+    appearance:none; border:1px solid var(--verde); background:var(--verde-bg); color:var(--verde); font-weight:700; font-size:13px;
+    padding:11px 18px; border-radius:10px; cursor:pointer; height:fit-content;
+  }
+  .hist-summary{ display:flex; gap:14px; margin-bottom:16px; flex-wrap:wrap; }
+  .hist-summary .stat-card{ min-width:140px; }
+
+  footer.tag{ text-align:center; padding:18px; color:var(--muted-2); font-size:11.5px; }
+  .legend{ display:flex; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-top:16px; }
+  .legend .dot{ display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:6px; }
+</style>
+</head>
+<body>
+
+<div id="storageWarning" style="display:none; background:#3a1414; color:#FF8080; padding:12px 24px; font-size:13.5px; text-align:center; border-bottom:1px solid #5a2222;">
+  ⚠️ Esta página no tiene disponible el guardado en la nube en este momento. Debes abrirla desde el enlace que Claude muestra dentro de la conversación (como Artifact), no descargando el archivo .html y abriéndolo directamente en el computador o celular — de esa forma no puede sincronizar datos entre dispositivos.
+</div>
+<header>
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <div class="brand-text">
+      <div class="eyebrow">PDV Medellín · Entrega de motos nuevas</div>
+      <div class="title">Tablero de agendamiento</div>
+    </div>
+  </div>
+  <nav class="tabs">
+    <button data-view="tablero" class="active">Tablero</button>
+    <button data-view="agenda">Agenda del día</button>
+    <button data-view="base">Base diaria</button>
+    <button data-view="historial">Historial</button>
+  </nav>
+  <div class="header-actions">
+    <button class="btn-ghost" id="btnScreenMode">🖥️ Modo pantalla</button>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ TABLERO (pantalla grande, solo clientes en espera) ============ -->
+  <section class="view active" id="view-tablero">
+    <div class="board-stats" id="boardStats"></div>
+    <div class="board-grid" id="boardGrid"></div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--verde)"></span>0–menos de 1 min</span>
+      <span><span class="dot" style="background:var(--amarillo)"></span>1–15 min</span>
+      <span><span class="dot" style="background:var(--naranja)"></span>16–25 min</span>
+      <span><span class="dot" style="background:var(--rojo)"></span>más de 25 min</span>
+      <span style="margin-left:auto">Tipo cliente: <b style="color:var(--naranja)">A</b> primera moto · <b style="color:var(--amarillo)">B</b> requiere explicación · <b style="color:var(--verde)">C</b> entrega rápida</span>
+    </div>
+  </section>
+
+  <!-- ============ AGENDA DEL DÍA ============ -->
+  <section class="view" id="view-agenda">
+    <div class="date-switch">
+      <div class="seg">
+        <button id="segHoy" class="active">Hoy</button>
+        <button id="segManana">Mañana</button>
+      </div>
+      <input type="date" id="agendaFechaInput">
+      <span class="current-label" id="agendaFechaLabel"></span>
+    </div>
+
+    <div class="panel">
+      <h2>Agendar cita para esta fecha</h2>
+      <p class="hint">El asesor digita el número de motor y la hora acordada con el cliente. La hora es siempre manual — no se toma del archivo de la base diaria.</p>
+      <div class="quick-form">
+        <div class="field"><label>Número de motor</label><input type="text" id="agMotor" placeholder="Ej. 5VK123456"></div>
+        <div class="field"><label>Hora acordada con el cliente</label><input type="time" id="agHora"></div>
+        <div class="field">
+          <label>Tipo de cliente</label>
+          <select id="agTipoCliente">
+            <option value="">Sin definir</option>
+            <option value="A">A · primera moto, requiere mucha explicación</option>
+            <option value="B">B · ya ha tenido moto, requiere explicación</option>
+            <option value="C">C · entrega rápida</option>
+          </select>
+        </div>
+        <button class="btn-primary" id="btnAgendar">Agendar</button>
+      </div>
+      <div class="feedback" id="fbAgendar"></div>
+
+      <div class="walkin-box" id="walkinBox">
+        <div class="field"><label>Cliente llegó sin cita agendada — número de motor</label><input type="text" id="agWalkinMotor" placeholder="Ej. 5VK123456"></div>
+        <button class="btn-primary" id="btnWalkin">Cliente llegó ✅</button>
+      </div>
+      <div class="feedback" id="fbWalkin"></div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="agenda-table" id="agendaTable">
+        <thead><tr>
+          <th>Motor</th><th>Cliente</th><th>Moto</th><th>Asesor</th><th>Tipo</th>
+          <th>Hora agendada</th><th>Estado</th><th>Acción</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ BASE DIARIA ============ -->
+  <section class="view" id="view-base">
+    <div class="panel">
+      <h2>Cargar base diaria</h2>
+      <p class="hint">Sube el archivo Excel que se descarga del sistema cada día (Motor, Nombre, Tipo de motocicleta, Asesor, Color). Aplica para la fecha seleccionada. La hora de la cita y el tipo de cliente (A/B/C) nunca se toman de este archivo — el asesor siempre los define manualmente en Agenda del día, según su criterio.</p>
+      <div class="field" style="max-width:260px;">
+        <label>Fecha de la base</label>
+        <input type="date" id="baseFecha">
+      </div>
+      <div class="dropzone" id="dropzone">
+        <div class="big">📄</div>
+        <div><b>Haz clic o arrastra tu archivo .xlsx aquí</b></div>
+        <div class="sub">Se detectarán las columnas automáticamente — podrás confirmarlas abajo.</div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none;">
+      </div>
+      <div id="mapArea"></div>
+      <div class="feedback" id="fbBase"></div>
+    </div>
+  </section>
+
+  <!-- ============ HISTORIAL ============ -->
+  <section class="view" id="view-historial">
+    <div class="panel">
+      <h2>Historial de entregas</h2>
+      <p class="hint">Consulta y exporta los tiempos de espera de días anteriores.</p>
+      <div class="hist-toolbar">
+        <div class="field">
+          <label>Fecha</label>
+          <select id="histFecha"></select>
+        </div>
+        <button class="btn-export" id="btnExport">⬇️ Exportar a Excel</button>
+      </div>
+      <div class="hist-summary" id="histSummary"></div>
+      <div class="table-wrap">
+        <table class="hist-table" id="histTable">
+          <thead><tr>
+            <th>Motor</th><th>Cliente</th><th>Moto</th><th>Asesor</th><th>Tipo</th>
+            <th>Hora agendada</th><th>Hora llegada</th><th>Hora entrega</th><th>Espera (min)</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="tag">Incolmotos Yamaha · PDV Medellín, Envigado, Sabaneta — tablero en vivo, sincronizado entre asesores y centro de servicio</footer>
+
+<script>
+// ============================================================
+// UTILIDADES DE FECHA / FORMATO
+// ============================================================
+function todayStr(d=new Date()){ return d.toISOString().slice(0,10); }
+function tomorrowStr(){ const d=new Date(); d.setDate(d.getDate()+1); return todayStr(d); }
+function fmtDateEs(iso){
+  if(!iso) return '—';
+  const [y,m,d]=iso.split('-');
+  const meses=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  return `${d} ${meses[parseInt(m,10)-1]} ${y}`;
+}
+function fmtElapsed(ms){
+  const totalSec = Math.max(0, Math.floor(ms/1000));
+  const h = Math.floor(totalSec/3600);
+  const m = Math.floor((totalSec%3600)/60);
+  const s = totalSec%60;
+  if(h>0) return `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+  return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+function zoneFor(mins){
+  if(mins < 1) return 'verde';
+  if(mins <= 15) return 'amarillo';
+  if(mins <= 25) return 'naranja';
+  return 'rojo';
+}
+function zoneColorVar(zone){
+  return {verde:'#2ECC71', amarillo:'#FFC93C', naranja:'#FF8C32', rojo:'#FF4545'}[zone];
+}
+function uid(){ return 'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// ============================================================
+// ALMACENAMIENTO COMPARTIDO (Google Sheets vía Apps Script)
+// ============================================================
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwb8pYpeH0l_TsEoIMzZqfkpBfYsKqy4gBqifzf4_NsDUARN2-w8_ic5kUjs-DWsfeCCA/exec';
+
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+function mensajeErrorGuardado(){
+  if(storageDisponible===false) return 'No se pudo guardar: no hay conexión con la base de datos (Google Sheets). Revisa tu conexión a internet e intenta de nuevo.';
+  return 'No se pudo guardar. Puede ser un problema momentáneo — intenta de nuevo en unos segundos.';
+}
+let storageDisponible = null;
+async function verificarAlmacenamiento(){
+  try{
+    const ok = await storageSet('__healthcheck__', '1');
+    storageDisponible = ok;
+  } catch(e){ storageDisponible = false; }
+  document.getElementById('storageWarning').style.display = storageDisponible ? 'none' : 'block';
+  return storageDisponible;
+}
+
+async function storageGet(key){
+  try{
+    const res = await fetch(`${SCRIPT_URL}?action=get&key=${encodeURIComponent(key)}`);
+    const data = await res.json();
+    return data.value ? JSON.parse(data.value) : null;
+  }catch(e){ console.error('storage get failed', key, e); return null; }
+}
+// Reintenta una vez tras una pausa corta antes de reportar fallo real
+// (evita marcar como error un simple pico momentáneo de solicitudes).
+async function storageSet(key, value){
+  const intentar = async () => {
+    const res = await fetch(SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita preflight CORS
+      body: JSON.stringify({ action: 'set', key, value: JSON.stringify(value) })
+    });
+    const data = await res.json();
+    return !!data.ok;
+  };
+  try{ return await intentar(); }
+  catch(e){
+    await sleep(800);
+    try{ return await intentar(); }
+    catch(e2){ console.error('storage set failed', key, e2); return false; }
+  }
+}
+async function getCitasDeFecha(fecha){
+  const data = await storageGet('citas:'+fecha);
+  return data || [];
+}
+async function setCitasDeFecha(fecha, arr){
+  const ok = await storageSet('citas:'+fecha, arr);
+  registrarFechaConCitas(fecha); // usa caché en memoria, no vuelve a consultar el almacenamiento
+  return ok;
+}
+
+// Índice de fechas con citas — se carga UNA sola vez al iniciar y se mantiene en memoria,
+// para no gastar una consulta extra al almacenamiento en cada guardado.
+let citasFechasCache = null;
+async function inicializarCitasFechasCache(){
+  citasFechasCache = (await storageGet('citas_fechas')) || [];
+}
+function registrarFechaConCitas(fecha){
+  if(!citasFechasCache) citasFechasCache = [];
+  if(!citasFechasCache.includes(fecha)){
+    citasFechasCache.push(fecha); citasFechasCache.sort();
+    storageSet('citas_fechas', citasFechasCache); // en segundo plano, no bloquea el guardado principal
+  }
+}
+
+// La base diaria (master) casi no cambia durante el día — se guarda en caché en memoria
+// y solo se vuelve a consultar el almacenamiento si no la tenemos ya cargada.
+let masterCache = {}; // fecha -> {rows:[...]} | null
+async function getMasterDeFecha(fecha){
+  if(Object.prototype.hasOwnProperty.call(masterCache, fecha)) return masterCache[fecha];
+  const data = await storageGet('master:'+fecha);
+  masterCache[fecha] = data || null;
+  return masterCache[fecha];
+}
+async function setMasterDeFecha(fecha, masterObj){
+  const ok = await storageSet('master:'+fecha, masterObj);
+  masterCache[fecha] = masterObj; // refrescar caché de inmediato
+  return ok;
+}
+
+function lookupMotorEnMaster(masterObj, motor){
+  if(!masterObj || !masterObj.rows) return null;
+  const norm = String(motor).trim().toUpperCase();
+  return masterObj.rows.find(r => String(r.motor||'').trim().toUpperCase() === norm) || null;
+}
+// Enriquecer campos del cliente/moto desde la base cargada.
+// NUNCA toca horaAgendada ni tipoCliente — esos dos siempre los define el asesor manualmente.
+function enriquecerCita(cita, masterObj){
+  const row = lookupMotorEnMaster(masterObj, cita.motor);
+  if(row){
+    cita.nombre = cita.nombre || row.nombre || 'Sin datos';
+    cita.tipoMoto = cita.tipoMoto || row.tipoMoto || '—';
+    cita.asesor = cita.asesor || row.asesor || '—';
+    cita.color = cita.color || row.color || '—';
+    cita.enriquecida = true;
+  }
+  return cita;
+}
+// Crea o actualiza una cita y la guarda. Devuelve {cita, citas, ok} para que quien llama
+// pueda pintar la tabla de inmediato con el arreglo ya actualizado (sin depender de un
+// nuevo get justo después del set, que puede tardar unos instantes en propagarse).
+async function agregarOActualizarCita(fecha, motor, patch){
+  const citas = await getCitasDeFecha(fecha);
+  let cita = citas.find(c=>c.motor.toUpperCase()===motor.toUpperCase() && c.estado!=='entregada');
+  if(cita){ Object.assign(cita, patch); }
+  else{
+    cita = { id: uid(), motor, fecha, horaAgendada:'', estado:'programada',
+      nombre:'', tipoMoto:'', asesor:'', color:'', tipoCliente:'',
+      horaLlegadaTs:null, horaEntregaTs:null, ...patch };
+    citas.push(cita);
+  }
+  const master = await getMasterDeFecha(fecha);
+  if(master) enriquecerCita(cita, master);
+  const ok = await setCitasDeFecha(fecha, citas);
+  return {cita, citas, ok};
+}
+
+// ============================================================
+// NAVEGACIÓN DE PESTAÑAS
+// ============================================================
+const views = ['tablero','agenda','base','historial'];
+document.querySelectorAll('nav.tabs button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    views.forEach(v=> document.getElementById('view-'+v).classList.toggle('active', v===btn.dataset.view));
+  });
+});
+document.getElementById('btnScreenMode').addEventListener('click', ()=>{
+  document.body.classList.toggle('screen-mode');
+});
+
+// ============================================================
+// SONIDO DE ALERTA (nuevo cliente en espera, para el tablero)
+// ============================================================
+let audioCtx = null;
+function beep(){
+  try{
+    audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
+    const t0 = audioCtx.currentTime;
+    [880, 660].forEach((freq,i)=>{
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type='sine'; osc.frequency.value=freq;
+      gain.gain.setValueAtTime(0.0001, t0+i*0.22);
+      gain.gain.exponentialRampToValueAtTime(0.25, t0+i*0.22+0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0+i*0.22+0.2);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(t0+i*0.22); osc.stop(t0+i*0.22+0.22);
+    });
+  }catch(e){ /* audio no disponible hasta interacción del usuario */ }
+}
+document.body.addEventListener('click', ()=>{ if(!audioCtx){ try{ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} } }, {once:true});
+
+// ============================================================
+// TABLERO — render en vivo (solo estado "esperando")
+// ============================================================
+let knownEsperandoIds = new Set();
+let firstBoardLoad = true;
+
+// Vuelve a consultar el almacenamiento (para sincronizar con otros dispositivos)
+async function refreshTablero(){
+  const citas = await getCitasDeFecha(todayStr());
+  renderTableroFromArray(citas);
+}
+// Pinta directamente un arreglo ya conocido en memoria (sin ir a buscarlo de nuevo)
+function renderTableroFromArray(citas){
+  const fecha = todayStr();
+  const esperando = citas.filter(c=>c.estado==='esperando').sort((a,b)=> a.horaLlegadaTs - b.horaLlegadaTs);
+
+  const currentIds = new Set(esperando.map(c=>c.id));
+  if(!firstBoardLoad){
+    for(const id of currentIds){ if(!knownEsperandoIds.has(id)) beep(); }
+  }
+  knownEsperandoIds = currentIds;
+  firstBoardLoad = false;
+
+  const now = Date.now();
+  const mins = esperando.map(c => (now - c.horaLlegadaTs)/60000);
+  const enRojo = mins.filter(m=>zoneFor(m)==='rojo').length;
+  const promedio = mins.length ? (mins.reduce((a,b)=>a+b,0)/mins.length) : 0;
+  const entregadasHoy = citas.filter(c=>c.estado==='entregada').length;
+
+  document.getElementById('boardStats').innerHTML = `
+    <div class="stat-card"><div class="num">${esperando.length}</div><div class="lbl">Clientes esperando</div></div>
+    <div class="stat-card ${enRojo>0?'warn':''}"><div class="num">${enRojo}</div><div class="lbl">En zona roja (+25 min)</div></div>
+    <div class="stat-card"><div class="num">${promedio? promedio.toFixed(0):'0'} min</div><div class="lbl">Espera promedio actual</div></div>
+    <div class="stat-card"><div class="num">${entregadasHoy}</div><div class="lbl">Entregadas hoy</div></div>
+  `;
+
+  const grid = document.getElementById('boardGrid');
+  if(esperando.length===0){
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><div class="big">🏍️</div>Sin clientes en espera en este momento.</div>`;
+    return;
+  }
+
+  grid.innerHTML = esperando.map((c, idx)=>{
+    const elapsedMs = now - c.horaLlegadaTs;
+    const elapsedMin = elapsedMs/60000;
+    const zone = zoneFor(elapsedMin);
+    const color = zoneColorVar(zone);
+    const pct = Math.min(1, elapsedMin/30);
+    const r = 40, circ = 2*Math.PI*r;
+    const offset = circ*(1-pct);
+    const tipoCls = c.tipoCliente ? 'tipo-'+c.tipoCliente : '';
+    return `
+      <div class="ticket zone-${zone}">
+        <span class="rank-badge">#${idx+1}</span>
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 96 96">
+            <circle class="gauge-track" cx="48" cy="48" r="${r}"></circle>
+            <circle class="gauge-fill" cx="48" cy="48" r="${r}" stroke="${color}"
+              stroke-dasharray="${circ}" stroke-dashoffset="${offset}"></circle>
+          </svg>
+          <div class="gauge-center">
+            <div class="gauge-time">${fmtElapsed(elapsedMs)}</div>
+            <div class="gauge-unit">esperando</div>
+          </div>
+        </div>
+        <div class="ticket-info">
+          <div class="cliente">${escapeHtml(c.nombre || 'Sin datos aún')}</div>
+          <div class="moto">${escapeHtml(c.tipoMoto||'—')} · ${escapeHtml(c.color||'—')} · Motor ${escapeHtml(c.motor)}</div>
+          <div class="ticket-meta">
+            <span><b>${escapeHtml(c.asesor||'—')}</b></span>
+            ${c.tipoCliente? `<span class="chip ${tipoCls}">Tipo ${c.tipoCliente}</span>`:''}
+            <span>Cita: <b>${c.horaAgendada || 'sin agendar'}</b></span>
+          </div>
+        </div>
+        <div class="ticket-actions">
+          <button class="btn-entregada" data-id="${c.id}">Entregada ✅</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  grid.querySelectorAll('.btn-entregada').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      btn.disabled = true; btn.textContent='Guardando…';
+      const {citas: nuevasCitas, ok} = await marcarEntregada(fecha, btn.dataset.id);
+      if(!ok){ alert(mensajeErrorGuardado()); }
+      renderTableroFromArray(nuevasCitas);
+      if(agendaFecha===fecha) renderAgendaFromArray(nuevasCitas);
+    });
+  });
+}
+
+async function marcarEntregada(fecha, id){
+  const citas = await getCitasDeFecha(fecha);
+  const c = citas.find(x=>x.id===id);
+  if(!c) return {citas, ok:false};
+  c.estado = 'entregada';
+  c.horaEntregaTs = Date.now();
+  const ok = await setCitasDeFecha(fecha, citas);
+  return {citas, ok};
+}
+async function marcarLlegadaPorId(fecha, id){
+  const citas = await getCitasDeFecha(fecha);
+  const c = citas.find(x=>x.id===id);
+  if(!c) return {citas, ok:false};
+  c.estado = 'esperando';
+  c.horaLlegadaTs = Date.now();
+  const master = await getMasterDeFecha(fecha);
+  if(master) enriquecerCita(c, master);
+  const ok = await setCitasDeFecha(fecha, citas);
+  return {citas, ok};
+}
+async function actualizarTipoCliente(fecha, id, tipo){
+  const citas = await getCitasDeFecha(fecha);
+  const c = citas.find(x=>x.id===id);
+  if(!c) return {citas, ok:false};
+  c.tipoCliente = tipo;
+  const ok = await setCitasDeFecha(fecha, citas);
+  return {citas, ok};
+}
+
+// ============================================================
+// AGENDA DEL DÍA — selector de fecha + agendar + ver todo + marcar llegada
+// ============================================================
+let agendaFecha = todayStr();
+
+function refreshDateSwitchUI(){
+  document.getElementById('segHoy').classList.toggle('active', agendaFecha===todayStr());
+  document.getElementById('segManana').classList.toggle('active', agendaFecha===tomorrowStr());
+  document.getElementById('agendaFechaInput').value = agendaFecha;
+  document.getElementById('agendaFechaLabel').textContent = fmtDateEs(agendaFecha);
+  document.getElementById('walkinBox').style.display = (agendaFecha===todayStr()) ? 'flex' : 'none';
+}
+document.getElementById('segHoy').addEventListener('click', ()=>{ agendaFecha=todayStr(); refreshDateSwitchUI(); refreshAgenda(); });
+document.getElementById('segManana').addEventListener('click', ()=>{ agendaFecha=tomorrowStr(); refreshDateSwitchUI(); refreshAgenda(); });
+document.getElementById('agendaFechaInput').addEventListener('change', (e)=>{ agendaFecha = e.target.value || todayStr(); refreshDateSwitchUI(); refreshAgenda(); });
+
+document.getElementById('btnAgendar').addEventListener('click', async ()=>{
+  const btn = document.getElementById('btnAgendar');
+  const motor = document.getElementById('agMotor').value.trim();
+  const hora = document.getElementById('agHora').value;
+  const tipoCliente = document.getElementById('agTipoCliente').value;
+  const fb = document.getElementById('fbAgendar');
+  if(!motor || !hora){ fb.className='feedback err'; fb.textContent='Escribe el número de motor y la hora acordada.'; return; }
+  btn.disabled = true; btn.textContent='Guardando…';
+  const citasExist = await getCitasDeFecha(agendaFecha);
+  if(citasExist.some(c=>c.motor.toUpperCase()===motor.toUpperCase() && c.estado!=='entregada')){
+    fb.className='feedback err'; fb.textContent='Ya existe una cita activa para ese número de motor en esta fecha.';
+    btn.disabled=false; btn.textContent='Agendar'; return;
+  }
+  const patch = {horaAgendada: hora, estado:'programada'};
+  if(tipoCliente) patch.tipoCliente = tipoCliente;
+  const {citas: nuevasCitas, ok} = await agregarOActualizarCita(agendaFecha, motor, patch);
+  btn.disabled=false; btn.textContent='Agendar';
+  if(!ok){ fb.className='feedback err'; fb.textContent=mensajeErrorGuardado(); return; }
+  fb.className='feedback ok'; fb.textContent=`Cita guardada para el ${fmtDateEs(agendaFecha)} a las ${hora}.`;
+  document.getElementById('agMotor').value=''; document.getElementById('agHora').value=''; document.getElementById('agTipoCliente').value='';
+  renderAgendaFromArray(nuevasCitas);
+});
+
+document.getElementById('btnWalkin').addEventListener('click', async ()=>{
+  const btn = document.getElementById('btnWalkin');
+  const motor = document.getElementById('agWalkinMotor').value.trim();
+  const fb = document.getElementById('fbWalkin');
+  if(!motor){ fb.className='feedback err'; fb.textContent='Escribe el número de motor.'; return; }
+  btn.disabled = true; btn.textContent='Guardando…';
+  const {cita, citas: nuevasCitas, ok} = await agregarOActualizarCita(agendaFecha, motor, {estado:'esperando', horaLlegadaTs: Date.now()});
+  btn.disabled = false; btn.textContent='Cliente llegó ✅';
+  if(!ok){ fb.className='feedback err'; fb.textContent=mensajeErrorGuardado(); return; }
+  fb.className='feedback ok';
+  fb.textContent = cita.nombre ? `Llegada registrada: ${cita.nombre}.` : 'Llegada registrada. Verifica que la base del día esté cargada para completar los datos.';
+  document.getElementById('agWalkinMotor').value='';
+  renderAgendaFromArray(nuevasCitas);
+  if(agendaFecha===todayStr()) renderTableroFromArray(nuevasCitas);
+});
+
+// Vuelve a consultar el almacenamiento (para sincronizar con otros dispositivos / pestañas)
+async function refreshAgenda(){
+  const citas = await getCitasDeFecha(agendaFecha);
+  renderAgendaFromArray(citas);
+}
+// Pinta directamente un arreglo ya conocido en memoria (sin ir a buscarlo de nuevo)
+function renderAgendaFromArray(citasSinOrdenar){
+  const citas = citasSinOrdenar.slice().sort((a,b)=> (a.horaAgendada||'99:99').localeCompare(b.horaAgendada||'99:99'));
+  const tbody = document.querySelector('#agendaTable tbody');
+  if(citas.length===0){
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--muted); padding:24px;">Aún no hay citas registradas para el ${fmtDateEs(agendaFecha)}.</td></tr>`;
+    return;
+  }
+  const now = Date.now();
+  const tipoOptions = (sel)=>['','A','B','C'].map(v=>{
+    const labels = {'':'Sin definir', A:'A', B:'B', C:'C'};
+    return `<option value="${v}" ${sel===v?'selected':''}>${labels[v]}</option>`;
+  }).join('');
+  tbody.innerHTML = citas.map(c=>{
+    let rowClass = '', estadoHtml = '', accionHtml = '';
+    if(c.estado==='programada'){
+      estadoHtml = `<span class="badge badge-programada">Programada</span>`;
+      accionHtml = (agendaFecha===todayStr())
+        ? `<button class="btn-mini green" data-action="llegada" data-id="${c.id}">Marcar llegada</button>`
+        : `<span style="color:var(--muted); font-size:12px;">—</span>`;
+    } else if(c.estado==='esperando'){
+      const elapsedMin = (now - c.horaLlegadaTs)/60000;
+      const zone = zoneFor(elapsedMin);
+      rowClass = 'row-esperando z-'+zone;
+      estadoHtml = `<span class="badge badge-${zone}">Esperando · <span class="cell-elapsed">${fmtElapsed(now - c.horaLlegadaTs)}</span></span>`;
+      accionHtml = `<button class="btn-mini" data-action="entregar" data-id="${c.id}">Entregada ✅</button>`;
+    } else {
+      rowClass = 'row-entregada';
+      const espera = c.horaEntregaTs && c.horaLlegadaTs ? ((c.horaEntregaTs-c.horaLlegadaTs)/60000).toFixed(0)+' min' : '—';
+      estadoHtml = `<span class="badge badge-entregada">Entregada</span>`;
+      accionHtml = `<span style="color:var(--muted); font-size:12px;">Espera: ${espera}</span>`;
+    }
+    return `<tr class="${rowClass}">
+      <td>${escapeHtml(c.motor)}</td>
+      <td>${escapeHtml(c.nombre||'—')}</td>
+      <td>${escapeHtml(c.tipoMoto||'—')}</td>
+      <td>${escapeHtml(c.asesor||'—')}</td>
+      <td><select class="tipo-select" data-id="${c.id}">${tipoOptions(c.tipoCliente||'')}</select></td>
+      <td>${c.horaAgendada||'—'}</td>
+      <td>${estadoHtml}</td>
+      <td>${accionHtml}</td>
+    </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('.tipo-select').forEach(sel=>{
+    sel.addEventListener('change', async ()=>{
+      sel.disabled = true;
+      const {citas: nuevasCitas, ok} = await actualizarTipoCliente(agendaFecha, sel.dataset.id, sel.value);
+      if(!ok) alert(mensajeErrorGuardado());
+      renderAgendaFromArray(nuevasCitas);
+    });
+  });
+  tbody.querySelectorAll('button[data-action="llegada"]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      btn.disabled=true; btn.textContent='Guardando…';
+      const {citas: nuevasCitas, ok} = await marcarLlegadaPorId(agendaFecha, btn.dataset.id);
+      if(!ok){ alert(mensajeErrorGuardado()); }
+      renderAgendaFromArray(nuevasCitas);
+      if(agendaFecha===todayStr()) renderTableroFromArray(nuevasCitas);
+    });
+  });
+  tbody.querySelectorAll('button[data-action="entregar"]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      btn.disabled=true; btn.textContent='Guardando…';
+      const {citas: nuevasCitas, ok} = await marcarEntregada(agendaFecha, btn.dataset.id);
+      if(!ok){ alert(mensajeErrorGuardado()); }
+      renderAgendaFromArray(nuevasCitas);
+      if(agendaFecha===todayStr()) renderTableroFromArray(nuevasCitas);
+    });
+  });
+}
+
+// refresco en vivo: cada 8s se refrescan tablero y agenda para reflejar cambios de otros dispositivos
+setInterval(()=>{
+  if(document.getElementById('view-tablero').classList.contains('active')) refreshTablero();
+  if(document.getElementById('view-agenda').classList.contains('active')) refreshAgenda();
+}, 8000);
+
+// ============================================================
+// BASE DIARIA — carga y mapeo de columnas (sin campo de hora)
+// ============================================================
+document.getElementById('baseFecha').value = todayStr();
+
+const FIELD_TARGETS = [
+  {key:'motor', label:'Número de motor', guesses:['motor','no motor','número de motor','numero de motor']},
+  {key:'nombre', label:'Nombre del cliente', guesses:['nombre','cliente','nombre cliente','nombre del cliente']},
+  {key:'tipoMoto', label:'Tipo de motocicleta', guesses:['tipo motocicleta','tipo de motocicleta','modelo','referencia']},
+  {key:'asesor', label:'Asesor', guesses:['asesor']},
+  {key:'color', label:'Color', guesses:['color']},
+];
+
+let lastParsedRows = null;
+let lastHeaders = null;
+
+function guessColumnFor(target, headers){
+  const norm = h => String(h).toLowerCase().trim();
+  const idx = headers.findIndex(h => target.guesses.some(g => norm(h)===g));
+  if(idx>=0) return idx;
+  return headers.findIndex(h => target.guesses.some(g => norm(h).includes(g)));
+}
+
+function setupDropzone(){
+  const dz = document.getElementById('dropzone');
+  const input = document.getElementById('fileInput');
+  dz.addEventListener('click', ()=> input.click());
+  dz.addEventListener('dragover', e=>{ e.preventDefault(); dz.classList.add('drag'); });
+  dz.addEventListener('dragleave', ()=> dz.classList.remove('drag'));
+  dz.addEventListener('drop', e=>{
+    e.preventDefault(); dz.classList.remove('drag');
+    if(e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+  });
+  input.addEventListener('change', e=>{ if(e.target.files.length) handleFile(e.target.files[0]); });
+}
+
+function handleFile(file){
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    const wb = XLSX.read(e.target.result, {type:'array'});
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+    if(rows.length < 2){
+      document.getElementById('fbBase').className='feedback err';
+      document.getElementById('fbBase').textContent='El archivo no tiene datos suficientes.';
+      return;
+    }
+    lastHeaders = rows[0];
+    lastParsedRows = rows.slice(1).filter(r=> r.some(c=>String(c).trim()!==''));
+    renderColumnMap();
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function renderColumnMap(){
+  const area = document.getElementById('mapArea');
+  let html = `<h2 style="margin-top:24px;">Confirmar columnas detectadas</h2>
+  <p class="hint">Se encontraron ${lastParsedRows.length} filas. Verifica que cada campo apunte a la columna correcta de tu archivo.</p>
+  <table class="map-table"><thead><tr><th>Campo requerido</th><th>Columna en tu archivo</th></tr></thead><tbody>`;
+  FIELD_TARGETS.forEach(t=>{
+    const guessIdx = guessColumnFor(t, lastHeaders);
+    html += `<tr><td>${t.label}${t.key==='motor'?' *':''}</td><td><select data-key="${t.key}">
+      <option value="-1">— no usar —</option>
+      ${lastHeaders.map((h,i)=>`<option value="${i}" ${i===guessIdx?'selected':''}>${escapeHtml(h||'(sin nombre col. '+(i+1)+')')}</option>`).join('')}
+    </select></td></tr>`;
+  });
+  html += `</tbody></table><button class="btn-primary" id="btnConfirmarBase" style="margin-top:18px;">Guardar base para esta fecha</button>`;
+  area.innerHTML = html;
+
+  document.getElementById('btnConfirmarBase').addEventListener('click', async ()=>{
+    const fecha = document.getElementById('baseFecha').value;
+    const fb = document.getElementById('fbBase');
+    if(!fecha){ fb.className='feedback err'; fb.textContent='Selecciona la fecha de la base.'; return; }
+    const map = {};
+    area.querySelectorAll('select[data-key]').forEach(sel=>{ map[sel.dataset.key] = parseInt(sel.value,10); });
+    if(map.motor===-1){ fb.className='feedback err'; fb.textContent='Debes asignar la columna de número de motor.'; return; }
+
+    const rows = lastParsedRows.map(r=>({
+      motor: map.motor>=0 ? String(r[map.motor]).trim() : '',
+      nombre: map.nombre>=0 ? String(r[map.nombre]).trim() : '',
+      tipoMoto: map.tipoMoto>=0 ? String(r[map.tipoMoto]).trim() : '',
+      asesor: map.asesor>=0 ? String(r[map.asesor]).trim() : '',
+      color: map.color>=0 ? String(r[map.color]).trim() : '',
+    })).filter(r=>r.motor);
+
+    await setMasterDeFecha(fecha, {rows});
+
+    const citas = await getCitasDeFecha(fecha);
+    if(citas.length){
+      const masterObj = {rows};
+      citas.forEach(c=> enriquecerCita(c, masterObj));
+      await setCitasDeFecha(fecha, citas);
+    }
+
+    fb.className='feedback ok';
+    fb.textContent = `Base cargada: ${rows.length} motos disponibles para ${fmtDateEs(fecha)}.`;
+    refreshAgenda(); refreshTablero();
+  });
+}
+
+// ============================================================
+// HISTORIAL
+// ============================================================
+async function renderHistorialSelector(){
+  const sel = document.getElementById('histFecha');
+  if(!citasFechasCache) await inicializarCitasFechasCache();
+  const ordenadas = [...citasFechasCache].sort().reverse();
+  sel.innerHTML = ordenadas.map(f=>`<option value="${f}">${fmtDateEs(f)}</option>`).join('') || `<option value="">Sin datos aún</option>`;
+  if(ordenadas.length) await renderHistorialTabla(ordenadas[0]);
+}
+document.getElementById('histFecha').addEventListener('change', e=> renderHistorialTabla(e.target.value));
+
+let currentHistRows = [];
+async function renderHistorialTabla(fecha){
+  const tbody = document.querySelector('#histTable tbody');
+  if(!fecha){ tbody.innerHTML=''; document.getElementById('histSummary').innerHTML=''; currentHistRows=[]; return; }
+  const citas = await getCitasDeFecha(fecha);
+  const entregadas = citas.filter(c=>c.estado==='entregada').sort((a,b)=> a.horaLlegadaTs - b.horaLlegadaTs);
+  currentHistRows = entregadas;
+
+  const esperas = entregadas.map(c=> (c.horaEntregaTs - c.horaLlegadaTs)/60000).filter(m=>!isNaN(m));
+  const prom = esperas.length ? (esperas.reduce((a,b)=>a+b,0)/esperas.length) : 0;
+  const max = esperas.length ? Math.max(...esperas) : 0;
+  document.getElementById('histSummary').innerHTML = `
+    <div class="stat-card"><div class="num">${entregadas.length}</div><div class="lbl">Entregas ese día</div></div>
+    <div class="stat-card"><div class="num">${prom.toFixed(0)} min</div><div class="lbl">Espera promedio</div></div>
+    <div class="stat-card"><div class="num">${max.toFixed(0)} min</div><div class="lbl">Espera máxima</div></div>
+  `;
+
+  tbody.innerHTML = entregadas.map(c=>{
+    const espera = ((c.horaEntregaTs - c.horaLlegadaTs)/60000).toFixed(0);
+    return `<tr>
+      <td>${escapeHtml(c.motor)}</td><td>${escapeHtml(c.nombre||'—')}</td><td>${escapeHtml(c.tipoMoto||'—')}</td>
+      <td>${escapeHtml(c.asesor||'—')}</td><td>${escapeHtml(c.tipoCliente||'—')}</td>
+      <td>${c.horaAgendada||'—'}</td>
+      <td>${new Date(c.horaLlegadaTs).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${new Date(c.horaEntregaTs).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'})}</td>
+      <td>${espera}</td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="9" style="text-align:center; color:var(--muted); padding:24px;">Sin entregas completadas ese día.</td></tr>`;
+}
+
+document.getElementById('btnExport').addEventListener('click', ()=>{
+  if(!currentHistRows.length){ alert('No hay datos para exportar en la fecha seleccionada.'); return; }
+  const data = currentHistRows.map(c=>({
+    Fecha: c.fecha, Motor: c.motor, Cliente: c.nombre, 'Tipo Moto': c.tipoMoto, Color: c.color,
+    Asesor: c.asesor, 'Tipo Cliente': c.tipoCliente, 'Hora Agendada': c.horaAgendada,
+    'Hora Llegada': new Date(c.horaLlegadaTs).toLocaleTimeString('es-CO'),
+    'Hora Entrega': new Date(c.horaEntregaTs).toLocaleTimeString('es-CO'),
+    'Espera (min)': ((c.horaEntregaTs - c.horaLlegadaTs)/60000).toFixed(0)
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Historial');
+  XLSX.writeFile(wb, `historial_entregas_${document.getElementById('histFecha').value||'export'}.xlsx`);
+});
+
+// ============================================================
+// INIT
+// ============================================================
+setupDropzone();
+refreshDateSwitchUI();
+verificarAlmacenamiento().then(()=>{
+  inicializarCitasFechasCache().then(()=>{
+    refreshTablero();
+    refreshAgenda();
+    renderHistorialSelector();
+  });
+});
+</script>
+</body>
+</html>
