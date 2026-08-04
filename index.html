@@ -836,10 +836,20 @@ function renderAgendaFromArray(citasSinOrdenar){
 }
 
 // refresco en vivo: cada 8s se refrescan tablero y agenda para reflejar cambios de otros dispositivos
-setInterval(()=>{
+function refrescoVivo(){
   if(document.getElementById('view-tablero').classList.contains('active')) refreshTablero();
   if(document.getElementById('view-agenda').classList.contains('active')) refreshAgenda();
-}, 8000);
+}
+setInterval(refrescoVivo, 8000);
+
+// Los navegadores pausan/frenan los setInterval cuando la pestaña queda en segundo plano
+// (se cambia de app, se bloquea la pantalla, etc.). Por eso el temporizador se "queda pegado".
+// Al volver a primer plano, forzamos un refresco inmediato para que se ponga al día de una vez.
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible'){
+    refrescoVivo();
+  }
+});
 
 // ============================================================
 // BASE DIARIA — carga y mapeo de columnas (sin campo de hora)
