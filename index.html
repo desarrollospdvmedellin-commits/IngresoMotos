@@ -634,8 +634,8 @@ function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 let storageDisponible = null;
 async function verificarAlmacenamiento(){
   try{
-    const ok = await storageSet('healthcheck', '1');
-    storageDisponible = ok;
+    await storageGet('healthcheck'); // una lectura basta para saber si hay conexión
+    storageDisponible = true;
   } catch(e){ storageDisponible = false; }
   document.getElementById('storageWarning').style.display = storageDisponible ? 'none' : 'block';
   return storageDisponible;
@@ -645,14 +645,27 @@ function mensajeErrorGuardado(){
   return 'No se pudo guardar. Puede ser un problema momentáneo — intenta de nuevo en unos segundos.';
 }
 
+// IMPORTANTE: si la lectura falla, se LANZA un error (no se devuelve null).
+// Antes, una lectura fallida devolvía null → se interpretaba como "lista vacía" → y al guardar
+// se sobrescribía la hoja con esa lista vacía, borrando la información de todos.
 async function storageGet(key){
-  try{
-    const res = await fetch(`${SCRIPT_URL}?action=get&key=${encodeURIComponent(key)}`);
-    const data = await res.json();
-    return data.value ? JSON.parse(data.value) : null;
-  }catch(e){ console.error('storage get failed', key, e); return null; }
+  let ultimoError;
+  for(let intento=0; intento<3; intento++){
+    try{
+      const res = await fetch(`${SCRIPT_URL}?action=get&key=${encodeURIComponent(key)}`);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      const data = await res.json();
+      if(data && data.error) throw new Error(data.error);
+      if(!data || data.value===undefined || data.value===null || data.value==='') return null; // realmente no hay datos
+      return JSON.parse(data.value); // si el JSON está cortado, lanza error (no se trata como vacío)
+    }catch(e){ ultimoError = e; await sleep(600*(intento+1)); }
+  }
+  console.error('storage get failed', key, ultimoError);
+  throw new Error('No se pudo leer "'+key+'" de Google Sheets');
 }
 async function storageSet(key, value){
+  const tam = JSON.stringify(value).length;
+  if(tam > 45000) console.warn('⚠️ "'+key+'" mide '+tam+' caracteres; una celda de Google Sheets admite máximo 50.000. Si el Apps Script lo guarda en una sola celda, se cortará.');
   const intentar = async () => {
     const res = await fetch(SCRIPT_URL, {
       method: 'POST',
@@ -683,12 +696,14 @@ let citasFechasCache = null;
 async function inicializarCitasFechasCache(){
   citasFechasCache = (await storageGet('citas_fechas')) || [];
 }
-function registrarFechaConCitas(fecha){
-  if(!citasFechasCache) citasFechasCache = [];
-  if(!citasFechasCache.includes(fecha)){
-    citasFechasCache.push(fecha); citasFechasCache.sort();
-    storageSet('citas_fechas', citasFechasCache);
-  }
+async function registrarFechaConCitas(fecha){
+  try{
+    if(citasFechasCache && citasFechasCache.includes(fecha)) return;
+    const actual = (await storageGet('citas_fechas')) || []; // leer lo último antes de escribir
+    const merged = Array.from(new Set([...actual, ...(citasFechasCache||[]), fecha])).sort();
+    citasFechasCache = merged;
+    await storageSet('citas_fechas', merged);
+  }catch(e){ console.error('No se pudo registrar la fecha', fecha, e); }
 }
 
 let masterCache = {};
@@ -715,6 +730,7 @@ async function getMasterAcumulado(){
   return masterAcumuladoCache;
 }
 async function actualizarMasterAcumulado(nuevasRows){
+  masterAcumuladoCache = null; // forzar lectura fresca
   const acumulado = await getMasterAcumulado();
   const map = {};
   acumulado.rows.forEach(r=>{ if(r.motor) map[r.motor.trim().toUpperCase()] = r; });
@@ -757,6 +773,7 @@ function existeMotorActivo(citas, motor, excluirId){
 // Crea o actualiza una cita y la guarda. Devuelve {cita, citas, ok} para pintar de inmediato
 // con el arreglo ya actualizado, sin depender de una nueva consulta justo después del guardado.
 async function agregarOActualizarCita(fecha, motor, patch){
+  const row = await buscarFilaMotor(fecha, motor); // antes de leer las citas, para que lectura y escritura queden pegadas
   const citas = await getCitasDeFecha(fecha);
   let cita = citas.find(c=>c.motor.toUpperCase()===motor.toUpperCase() && c.estado!=='entregada');
   if(cita){ Object.assign(cita, patch); }
@@ -766,7 +783,6 @@ async function agregarOActualizarCita(fecha, motor, patch){
       horaLlegadaTs:null, horaEntregaTs:null, ...patch };
     citas.push(cita);
   }
-  const row = await buscarFilaMotor(fecha, motor);
   if(row) aplicarDatosMotor(cita, row);
   const ok = await setCitasDeFecha(fecha, citas);
   return {cita, citas, ok};
@@ -781,12 +797,13 @@ async function marcarEntregada(fecha, id){
   return {citas, ok};
 }
 async function marcarLlegadaPorId(fecha, id){
-  const citas = await getCitasDeFecha(fecha);
+  const previa = (await getCitasDeFecha(fecha)).find(x=>x.id===id);
+  const row = previa ? await buscarFilaMotor(fecha, previa.motor) : null;
+  const citas = await getCitasDeFecha(fecha); // lectura fresca justo antes de guardar
   const c = citas.find(x=>x.id===id);
   if(!c) return {citas, ok:false};
   c.estado = 'esperando';
   c.horaLlegadaTs = Date.now();
-  const row = await buscarFilaMotor(fecha, c.motor);
   if(row) aplicarDatosMotor(c, row);
   const ok = await setCitasDeFecha(fecha, citas);
   return {citas, ok};
@@ -863,6 +880,23 @@ async function reagendarCita(fechaOrigen, id, nuevaFecha, nuevaHora){
   return {ok: okOrigen && okDestino, citasFechaOrigen: citasOrigen, citasFechaDestino: nuevasDestino};
 }
 
+// Si falla la lectura, estas funciones devuelven ok:false en vez de guardar datos incompletos.
+function conProteccion(fn){
+  return async function(...args){
+    try{ return await fn(...args); }
+    catch(e){ console.error(e); storageDisponible = false; return {citas: [], ok:false}; }
+  };
+}
+agregarOActualizarCita = conProteccion(agregarOActualizarCita);
+marcarEntregada      = conProteccion(marcarEntregada);
+marcarLlegadaPorId   = conProteccion(marcarLlegadaPorId);
+marcarEnProceso      = conProteccion(marcarEnProceso);
+liberarProceso       = conProteccion(liberarProceso);
+actualizarTipoCliente= conProteccion(actualizarTipoCliente);
+actualizarPlacaProceso = conProteccion(actualizarPlacaProceso);
+eliminarCita         = conProteccion(eliminarCita);
+reagendarCita        = conProteccion(reagendarCita);
+
 // ============================================================
 // NAVEGACIÓN DE PESTAÑAS
 // ============================================================
@@ -925,8 +959,8 @@ let knownEnProcesoIds = new Set();
 let firstBoardLoad = true;
 
 async function refreshTablero(){
-  const citas = await getCitasDeFecha(todayStr());
-  renderTableroFromArray(citas);
+  try{ renderTableroFromArray(await getCitasDeFecha(todayStr())); }
+  catch(e){ console.warn('Tablero: no se pudo refrescar, se conserva lo que estaba en pantalla', e); }
 }
 function renderTableroFromArray(citas){
   const fecha = todayStr();
@@ -1083,10 +1117,16 @@ document.getElementById('claimGuardar').addEventListener('click', async ()=>{
 });
 
 // refresco en vivo: cada 8s se refrescan tablero y agenda para reflejar cambios de otros dispositivos
-setInterval(()=>{
-  if(document.getElementById('view-tablero').classList.contains('active')) refreshTablero();
-  if(document.getElementById('view-agenda').classList.contains('active')) refreshAgenda();
-}, 8000);
+let refrescando = false;
+setInterval(async ()=>{
+  if(document.hidden || refrescando) return; // no gastar cuota de Apps Script si nadie está mirando
+  refrescando = true;
+  try{
+    if(document.getElementById('view-tablero').classList.contains('active')) await refreshTablero();
+    if(document.getElementById('view-agenda').classList.contains('active')) await refreshAgenda();
+  } finally { refrescando = false; }
+}, 10000);
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ refreshTablero(); refreshAgenda(); } });
 
 // ============================================================
 // AGENDA DEL DÍA — selector de fecha + agendar + ver todo + acciones
@@ -1148,8 +1188,8 @@ document.getElementById('btnAgendar').addEventListener('click', async ()=>{
 });
 
 async function refreshAgenda(){
-  const citas = await getCitasDeFecha(agendaFecha);
-  renderAgendaFromArray(citas);
+  try{ renderAgendaFromArray(await getCitasDeFecha(agendaFecha)); }
+  catch(e){ console.warn('Agenda: no se pudo refrescar, se conserva lo que estaba en pantalla', e); }
 }
 let currentAgendaCitas = [];
 function renderAgendaFromArray(citasSinOrdenar){
@@ -1532,13 +1572,20 @@ document.getElementById('btnExport').addEventListener('click', ()=>{
 // ============================================================
 setupDropzone();
 refreshDateSwitchUI();
-verificarAlmacenamiento().then(()=>{
-  inicializarCitasFechasCache().then(()=>{
-    refreshTablero();
-    refreshAgenda();
-    renderHistorialSelector();
+// Guardar el texto original de cada botón para poder restaurarlo si una acción falla
+document.querySelectorAll('button').forEach(b=>{ b.dataset.label = b.textContent; });
+window.addEventListener('unhandledrejection', (ev)=>{
+  console.error(ev.reason);
+  document.querySelectorAll('button:disabled').forEach(b=>{
+    if(b.textContent.includes('Guardando') && b.dataset.label){ b.disabled=false; b.textContent=b.dataset.label; }
   });
+  if(typeof mostrarToast==='function') mostrarToast('No se pudo conectar con la base de datos. No se guardó nada; intenta de nuevo.', 'err');
 });
+// Todo en paralelo (antes eran 3 viajes en serie antes de mostrar algo)
+verificarAlmacenamiento();
+refreshTablero();
+refreshAgenda();
+inicializarCitasFechasCache().catch(e=>console.error(e)).then(()=>{ if(citasFechasCache) renderHistorialSelector(); });
 </script>
 </body>
 </html>
