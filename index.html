@@ -328,7 +328,7 @@
 <body>
 
 <div id="storageWarning" style="display:none; background:#3a1414; color:#FF8080; padding:12px 24px; font-size:13.5px; text-align:center; border-bottom:1px solid #5a2222;">
-  ⚠️ Esta página no tiene disponible el guardado en la nube en este momento. Ábrela desde el enlace publicado por Claude (no como archivo descargado) para que se sincronice entre dispositivos.
+  ⚠️ Esta página no tiene disponible el guardado en la nube en este momento. Revisa tu conexión a internet y recarga la página; mientras tanto los cambios no se guardarán en Google Sheets.
 </div>
 
 <div id="appRoot">
@@ -648,7 +648,8 @@ function mensajeErrorGuardado(){
 // IMPORTANTE: si la lectura falla, se LANZA un error (no se devuelve null).
 // Antes, una lectura fallida devolvía null → se interpretaba como "lista vacía" → y al guardar
 // se sobrescribía la hoja con esa lista vacía, borrando la información de todos.
-async function storageGet(key){
+// Lectura "cruda" de una clave (una sola celda).
+async function storageGetCrudo(key){
   let ultimoError;
   for(let intento=0; intento<3; intento++){
     try{
@@ -663,16 +664,15 @@ async function storageGet(key){
   console.error('storage get failed', key, ultimoError);
   throw new Error('No se pudo leer "'+key+'" de Google Sheets');
 }
-async function storageSet(key, value){
-  const tam = JSON.stringify(value).length;
-  if(tam > 45000) console.warn('⚠️ "'+key+'" mide '+tam+' caracteres; una celda de Google Sheets admite máximo 50.000. Si el Apps Script lo guarda en una sola celda, se cortará.');
+async function storageSetCrudo(key, valueStr){
   const intentar = async () => {
     const res = await fetch(SCRIPT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // evita preflight CORS
-      body: JSON.stringify({ action: 'set', key, value: JSON.stringify(value) })
+      body: JSON.stringify({ action: 'set', key, value: valueStr })
     });
     const data = await res.json();
+    if(!data.ok) console.error('Google Sheets rechazó el guardado de', key, data);
     return !!data.ok;
   };
   try{ return await intentar(); }
@@ -681,6 +681,36 @@ async function storageSet(key, value){
     try{ return await intentar(); }
     catch(e2){ console.error('storage set failed', key, e2); return false; }
   }
+}
+
+// Una celda de Google Sheets admite máximo 50.000 caracteres. Los valores más grandes
+// (p. ej. el catálogo acumulado de motos, que crece cada día) se parten en varias celdas:
+//   clave            → {"__partes": n, "v": "<versión>"}
+//   clave::parte0..n → {"v": "<versión>", "d": "<trozo de texto>"}
+// La versión permite detectar si se leyó una mezcla de dos guardados simultáneos.
+const TAM_PARTE = 40000;
+async function storageGet(key){
+  for(let intento=0; intento<3; intento++){
+    const data = await storageGetCrudo(key);
+    if(!data || typeof data!=='object' || !data.__partes) return data; // valor normal (o formato anterior)
+    const partes = await Promise.all(
+      Array.from({length: data.__partes}, (_,i)=> storageGetCrudo(key+'::parte'+i))
+    );
+    if(partes.every(p=> p && p.v===data.v)) return JSON.parse(partes.map(p=>p.d).join(''));
+    await sleep(700); // alguien estaba guardando al mismo tiempo: reintentar
+  }
+  throw new Error('No se pudo leer "'+key+'" completo de Google Sheets');
+}
+async function storageSet(key, value){
+  const str = JSON.stringify(value);
+  if(str.length <= TAM_PARTE) return storageSetCrudo(key, str);
+  const v = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  const trozos = [];
+  for(let i=0; i<str.length; i+=TAM_PARTE) trozos.push(str.slice(i, i+TAM_PARTE));
+  // primero las partes, al final el índice: así nadie lee un índice que apunte a partes aún no guardadas
+  const oks = await Promise.all(trozos.map((d,i)=> storageSetCrudo(key+'::parte'+i, JSON.stringify({v, d}))));
+  if(!oks.every(Boolean)) return false;
+  return storageSetCrudo(key, JSON.stringify({__partes: trozos.length, v}));
 }
 async function getCitasDeFecha(fecha){
   const data = await storageGet('citas:'+fecha);
@@ -729,16 +759,41 @@ async function getMasterAcumulado(){
   masterAcumuladoCache = data || {rows: []};
   return masterAcumuladoCache;
 }
+// Devuelve true si el catálogo quedó guardado en Google Sheets.
 async function actualizarMasterAcumulado(nuevasRows){
   masterAcumuladoCache = null; // forzar lectura fresca
   const acumulado = await getMasterAcumulado();
   const map = {};
+  // Una sola vez: recuperar las bases de días anteriores que no alcanzaron a sumarse al catálogo
+  // cuando éste superó el límite de una celda y dejó de guardarse.
+  const yaReconstruido = await storageGet('master_acumulado_reconstruido').catch(()=>null);
+  if(!yaReconstruido){
+    const fechas = [];
+    for(let i=0; i<=120; i++){ const d=new Date(); d.setDate(d.getDate()-i); fechas.push(todayStr(d)); }
+    for(let i=0; i<fechas.length; i+=10){
+      const lote = await Promise.all(fechas.slice(i,i+10).map(f=> storageGet('master:'+f).catch(()=>null)));
+      lote.slice().reverse().forEach(m=>{ (m && m.rows || []).forEach(r=>{ if(r.motor) map[r.motor.trim().toUpperCase()] = r; }); });
+    }
+  }
   acumulado.rows.forEach(r=>{ if(r.motor) map[r.motor.trim().toUpperCase()] = r; });
   nuevasRows.forEach(r=>{ if(r.motor) map[r.motor.trim().toUpperCase()] = r; });
   const merged = {rows: Object.values(map)};
-  await storageSet('master_acumulado', merged);
+  const ok = await storageSet('master_acumulado', merged);
+  if(ok && !yaReconstruido) await storageSet('master_acumulado_reconstruido', true);
   masterAcumuladoCache = merged;
-  return merged;
+  return ok;
+}
+
+// ¿El motor aparece en alguna base cargada? Revisa el catálogo acumulado y, por si éste
+// quedó desactualizado, también la base de la fecha de la cita y la de hoy.
+async function motorEstaAlistado(fecha, motor){
+  const acumulado = await getMasterAcumulado();
+  if(lookupMotorEnMaster(acumulado, motor)) return true;
+  for(const f of new Set([fecha, todayStr()])){
+    if(lookupMotorEnMaster(await getMasterDeFecha(f), motor)) return true;
+  }
+  // si todavía no se ha cargado ninguna base, no se bloquea el agendamiento
+  return acumulado.rows.length===0;
 }
 
 function lookupMotorEnMaster(masterObj, motor){
@@ -1169,8 +1224,7 @@ document.getElementById('btnAgendar').addEventListener('click', async ()=>{
     poblarSelectHoras('agHora', agendaFecha, citasExist, null);
     return;
   }
-  const acumuladoAgendar = await getMasterAcumulado();
-  if(acumuladoAgendar.rows.length>0 && !lookupMotorEnMaster(acumuladoAgendar, motor)){
+  if(!(await motorEstaAlistado(agendaFecha, motor))){
     fb.className='feedback err';
     fb.textContent = '🚫 Moto sin alistar: el motor ' + motor + ' no aparece en ninguna base cargada hasta ahora. Aún no se puede agendar — repórtalo a la persona encargada.';
     btn.disabled=false; btn.textContent='Agendar';
@@ -1343,8 +1397,7 @@ document.getElementById('modalGuardar').addEventListener('click', async ()=>{
 
   const citasOrigenActuales = (nuevaFecha===modalFechaOrigen) ? citasDestinoActuales : await getCitasDeFecha(modalFechaOrigen);
   const citaMovida = citasOrigenActuales.find(c=>c.id===modalCitaId);
-  const acumuladoReagendar = citaMovida ? await getMasterAcumulado() : null;
-  if(citaMovida && acumuladoReagendar && acumuladoReagendar.rows.length>0 && !lookupMotorEnMaster(acumuladoReagendar, citaMovida.motor)){
+  if(citaMovida && !(await motorEstaAlistado(nuevaFecha, citaMovida.motor))){
     fb.className='feedback err';
     fb.textContent = '🚫 Moto sin alistar: el motor ' + citaMovida.motor + ' no aparece en ninguna base cargada hasta ahora. Repórtalo a la persona encargada antes de reagendar.';
     btn.disabled=false; btn.textContent='Guardar';
@@ -1479,7 +1532,9 @@ function renderColumnMap(){
 
     const ok = await setMasterDeFecha(fecha, {rows});
     if(!ok){ fb.className='feedback err'; fb.textContent=mensajeErrorGuardado(); return; }
-    await actualizarMasterAcumulado(rows);
+    fb.className='feedback'; fb.textContent='Guardando base y actualizando catálogo… (la primera vez puede tardar unos segundos)';
+    const okAcumulado = await actualizarMasterAcumulado(rows);
+    if(!okAcumulado){ fb.className='feedback err'; fb.textContent='La base del día se guardó, pero el catálogo acumulado no se pudo actualizar. Intenta cargar el archivo de nuevo.'; return; }
 
     const citas = await getCitasDeFecha(fecha);
     if(citas.length){
