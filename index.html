@@ -651,7 +651,7 @@ function mensajeErrorGuardado(){
 // Lectura "cruda" de una clave (una sola celda).
 async function storageGetCrudo(key){
   let ultimoError;
-  for(let intento=0; intento<3; intento++){
+  for(let intento=0; intento<4; intento++){
     try{
       const res = await fetch(`${SCRIPT_URL}?action=get&key=${encodeURIComponent(key)}`);
       if(!res.ok) throw new Error('HTTP '+res.status);
@@ -659,7 +659,7 @@ async function storageGetCrudo(key){
       if(data && data.error) throw new Error(data.error);
       if(!data || data.value===undefined || data.value===null || data.value==='') return null; // realmente no hay datos
       return JSON.parse(data.value); // si el JSON está cortado, lanza error (no se trata como vacío)
-    }catch(e){ ultimoError = e; await sleep(600*(intento+1)); }
+    }catch(e){ ultimoError = e; if(intento<3) await sleep(1000*Math.pow(2,intento)); }
   }
   console.error('storage get failed', key, ultimoError);
   throw new Error('No se pudo leer "'+key+'" de Google Sheets');
@@ -672,15 +672,14 @@ async function storageSetCrudo(key, valueStr){
       body: JSON.stringify({ action: 'set', key, value: valueStr })
     });
     const data = await res.json();
-    if(!data.ok) console.error('Google Sheets rechazó el guardado de', key, data);
-    return !!data.ok;
+    if(!data.ok) throw new Error('Google Sheets rechazó el guardado: '+JSON.stringify(data).slice(0,200));
+    return true;
   };
-  try{ return await intentar(); }
-  catch(e){
-    await sleep(800);
+  for(let intento=0; intento<3; intento++){
     try{ return await intentar(); }
-    catch(e2){ console.error('storage set failed', key, e2); return false; }
+    catch(e){ console.error('storage set failed', key, 'intento', intento+1, e); if(intento<2) await sleep(1000*Math.pow(2,intento)); }
   }
+  return false;
 }
 
 // Una celda de Google Sheets admite máximo 50.000 caracteres. Los valores más grandes
@@ -688,7 +687,7 @@ async function storageSetCrudo(key, valueStr){
 //   clave            → {"__partes": n, "v": "<versión>"}
 //   clave::parte0..n → {"v": "<versión>", "d": "<trozo de texto>"}
 // La versión permite detectar si se leyó una mezcla de dos guardados simultáneos.
-const TAM_PARTE = 40000;
+const TAM_PARTE = 30000;
 async function storageGet(key){
   for(let intento=0; intento<3; intento++){
     const data = await storageGetCrudo(key);
@@ -770,8 +769,9 @@ async function actualizarMasterAcumulado(nuevasRows){
   if(!yaReconstruido){
     const fechas = [];
     for(let i=0; i<=120; i++){ const d=new Date(); d.setDate(d.getDate()-i); fechas.push(todayStr(d)); }
-    for(let i=0; i<fechas.length; i+=10){
-      const lote = await Promise.all(fechas.slice(i,i+10).map(f=> storageGet('master:'+f).catch(()=>null)));
+    await storageSet('master_acumulado_reconstruido', true); // marcar antes: aunque falle, no se repite la ráfaga de lecturas
+    for(let i=0; i<fechas.length; i+=3){
+      const lote = await Promise.all(fechas.slice(i,i+3).map(f=> storageGet('master:'+f).catch(()=>null)));
       lote.slice().reverse().forEach(m=>{ (m && m.rows || []).forEach(r=>{ if(r.motor) map[r.motor.trim().toUpperCase()] = r; }); });
     }
   }
@@ -779,7 +779,6 @@ async function actualizarMasterAcumulado(nuevasRows){
   nuevasRows.forEach(r=>{ if(r.motor) map[r.motor.trim().toUpperCase()] = r; });
   const merged = {rows: Object.values(map)};
   const ok = await storageSet('master_acumulado', merged);
-  if(ok && !yaReconstruido) await storageSet('master_acumulado_reconstruido', true);
   masterAcumuladoCache = merged;
   return ok;
 }
@@ -1171,7 +1170,7 @@ document.getElementById('claimGuardar').addEventListener('click', async ()=>{
   if(agendaFecha===claimFecha) renderAgendaFromArray(nuevasCitas);
 });
 
-// refresco en vivo: cada 8s se refrescan tablero y agenda para reflejar cambios de otros dispositivos
+// refresco en vivo: cada 20s se refrescan tablero y agenda para reflejar cambios de otros dispositivos
 let refrescando = false;
 setInterval(async ()=>{
   if(document.hidden || refrescando) return; // no gastar cuota de Apps Script si nadie está mirando
@@ -1180,7 +1179,7 @@ setInterval(async ()=>{
     if(document.getElementById('view-tablero').classList.contains('active')) await refreshTablero();
     if(document.getElementById('view-agenda').classList.contains('active')) await refreshAgenda();
   } finally { refrescando = false; }
-}, 10000);
+}, 20000);
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ refreshTablero(); refreshAgenda(); } });
 
 // ============================================================
